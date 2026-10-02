@@ -5,9 +5,10 @@ use crate::planner;
 use crate::speed::SpeedMeter;
 use crate::state::Store;
 use crate::types::*;
+use crate::{stream, ytdlp};
 use reqwest::Client;
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, Weak};
 use std::time::Duration;
@@ -38,6 +39,7 @@ struct Entry {
 struct Inner {
     client: Client,
     store: Store,
+    data_dir: PathBuf,
     settings: RwLock<Settings>,
     downloads: Mutex<BTreeMap<DownloadId, Entry>>,
     events: broadcast::Sender<DownloadEvent>,
@@ -64,6 +66,7 @@ impl Engine {
         let inner = Arc::new(Inner {
             client,
             store: Store::new(data_dir)?,
+            data_dir: data_dir.to_path_buf(),
             settings: RwLock::new(settings),
             downloads: Mutex::new(BTreeMap::new()),
             events,
@@ -85,8 +88,18 @@ impl Engine {
         let mut max_id = 0;
         for mut m in metas {
             max_id = max_id.max(m.id);
+            let mut dirty = false;
+            // v1 rows were always plain files; leaving them Auto would re-probe on resume.
+            if m.version < 2 {
+                m.kind = Kind::File;
+                m.version = META_VERSION;
+                dirty = true;
+            }
             if m.status.is_active() {
                 m.status = DownloadStatus::Paused;
+                dirty = true;
+            }
+            if dirty {
                 let _ = self.inner.store.save(&m);
             }
             let downloaded = m.downloaded();
@@ -123,9 +136,14 @@ impl Engine {
                     .and_then(|u| crate::filename::from_url(&u))
             })
             .unwrap_or_else(|| "download".into());
+        let kind = request.kind;
         let meta = DownloadMeta {
             version: META_VERSION,
             id,
+            kind,
+            total_is_estimate: false,
+            note: None,
+            stream: None,
             request,
             final_url: String::new(),
             filename,
@@ -205,15 +223,16 @@ impl Engine {
         }
         self.inner.set_status(e, DownloadStatus::Cancelled);
         if delete_files {
-            let part = lock(&e.meta).part_path.clone();
-            remove_if_exists(&part);
+            for p in lock(&e.meta).partial_paths() {
+                remove_path(&p);
+            }
         }
         Ok(())
     }
 
     /// Stops the download if running, deletes its sidecar, and optionally its partial file.
     pub async fn remove(&self, id: DownloadId, delete_files: bool) -> Result<()> {
-        let (task, part, fin, status) = {
+        let (task, parts, fin, status) = {
             let mut map = lock(&self.inner.downloads);
             let e = map.get_mut(&id).ok_or(EngineError::NotFound(id))?;
             e.intent = Intent::Cancel {
@@ -225,7 +244,7 @@ impl Engine {
             let m = lock(&e.meta);
             (
                 e.task.take(),
-                m.part_path.clone(),
+                m.partial_paths(),
                 m.final_path.clone(),
                 m.status.clone(),
             )
@@ -236,9 +255,11 @@ impl Engine {
         lock(&self.inner.downloads).remove(&id);
         self.inner.store.delete(id)?;
         if delete_files {
-            remove_if_exists(&part);
+            for p in parts {
+                remove_path(&p);
+            }
             if status != DownloadStatus::Completed {
-                remove_if_exists(&fin);
+                remove_path(&fin);
             }
         }
         let _ = self.inner.events.send(DownloadEvent::Removed { id });
@@ -250,7 +271,8 @@ impl Engine {
             .values()
             .map(|e| {
                 let m = lock(&e.meta);
-                let remaining = m.total.map(|t| t.saturating_sub(m.downloaded()));
+                let (total, _) = m.effective_total();
+                let remaining = total.map(|t| t.saturating_sub(m.downloaded()));
                 let eta = if m.status.is_active() {
                     remaining.and_then(|r| e.speed.eta_secs(r))
                 } else {
@@ -390,10 +412,10 @@ impl Inner {
                 break;
             }
             let Some(e) = map.get_mut(&id) else { continue };
-            let (url, per_download) = {
+            let (url, per_download, kind) = {
                 let mut m = lock(&e.meta);
                 m.status = DownloadStatus::Probing;
-                (m.request.url.clone(), m.request.max_connections)
+                (m.request.url.clone(), m.request.max_connections, m.kind)
             };
             let max_connections =
                 planner::clamp_connections(per_download.unwrap_or(settings.max_connections));
@@ -407,6 +429,10 @@ impl Inner {
                 host_sem: self.host_sem(&url, settings.max_connections),
                 max_connections,
                 default_dir: settings.download_dir.clone(),
+                data_dir: self.data_dir.clone(),
+                ffmpeg_path: settings.ffmpeg_path.clone(),
+                ytdlp_path: settings.ytdlp_path.clone(),
+                js_runtime: settings.js_runtime.clone(),
                 events: self.events.clone(),
             });
             e.speed.reset(lock(&e.meta).downloaded());
@@ -414,7 +440,11 @@ impl Inner {
             e.intent = Intent::None;
             let inner = self.clone();
             e.task = Some(tokio::spawn(async move {
-                let result = download::run(ctx).await;
+                let result = match kind {
+                    Kind::Ytdlp => ytdlp::run(ctx).await,
+                    Kind::Hls | Kind::Dash => stream::run(ctx).await,
+                    Kind::Auto | Kind::File => download::run(ctx).await,
+                };
                 inner.on_finished(id, result);
             }));
             active += 1;
@@ -432,7 +462,9 @@ impl Inner {
             RunResult::Interrupted => match intent {
                 Intent::Cancel { delete_files } => {
                     if delete_files {
-                        remove_if_exists(&lock(&e.meta).part_path);
+                        for p in lock(&e.meta).partial_paths() {
+                            remove_path(&p);
+                        }
                     }
                     DownloadStatus::Cancelled
                 }
@@ -471,9 +503,8 @@ async fn ticker(weak: Weak<Inner>) {
             }
             let downloaded = m.downloaded();
             let rate = e.speed.sample(downloaded);
-            let eta = m
-                .total
-                .and_then(|t| e.speed.eta_secs(t.saturating_sub(downloaded)));
+            let (total, _) = m.effective_total();
+            let eta = total.and_then(|t| e.speed.eta_secs(t.saturating_sub(downloaded)));
             let _ = inner
                 .events
                 .send(DownloadEvent::Progress(to_progress(&m, rate, eta)));
@@ -485,33 +516,77 @@ async fn ticker(weak: Weak<Inner>) {
 }
 
 fn to_progress(m: &DownloadMeta, speed_bps: f64, eta_secs: Option<u64>) -> Progress {
+    let (total, total_is_estimate) = m.effective_total();
+    let (segments, segment_count, segments_done) = match (&m.stream, m.kind.is_stream()) {
+        // Stream bars are in segment units: a contiguous written front per
+        // track plus one dot per fetched-but-unwritten segment.
+        (Some(st), true) => {
+            let mut segs = Vec::new();
+            let mut base = 0u64;
+            for t in &st.tracks {
+                let count = t.segment_count as u64;
+                if t.segments_done > 0 {
+                    segs.push(SegmentProgress {
+                        start: base,
+                        end: base + count.saturating_sub(1),
+                        downloaded: t.segments_done as u64,
+                    });
+                }
+                for &r in &t.ready {
+                    segs.push(SegmentProgress {
+                        start: base + r as u64,
+                        end: base + r as u64,
+                        downloaded: 1,
+                    });
+                }
+                base += count;
+            }
+            let (count, done) = m.segment_counts().unwrap_or((0, 0));
+            (segs, Some(count), Some(done))
+        }
+        _ => (
+            m.segments
+                .iter()
+                .map(|s| SegmentProgress {
+                    start: s.start,
+                    end: s.end,
+                    downloaded: s.downloaded,
+                })
+                .collect(),
+            None,
+            None,
+        ),
+    };
     Progress {
         id: m.id,
         status: m.status.clone(),
+        kind: m.kind,
         url: m.request.url.clone(),
         filename: m.filename.clone(),
         final_path: m.final_path.clone(),
-        total: m.total,
+        total,
+        total_is_estimate,
         downloaded: m.downloaded(),
         speed_bps,
         eta_secs,
         resumable: m.resumable,
-        segments: m
-            .segments
-            .iter()
-            .map(|s| SegmentProgress {
-                start: s.start,
-                end: s.end,
-                downloaded: s.downloaded,
-            })
-            .collect(),
+        segments,
+        segment_count,
+        segments_done,
+        note: m.note.clone(),
         created_at: m.created_at,
         completed_at: m.completed_at,
     }
 }
 
-fn remove_if_exists(p: &Path) {
-    if !p.as_os_str().is_empty() {
+/// Removes a partial file, or a whole temp directory (yt-dlp jobs).
+fn remove_path(p: &Path) {
+    if p.as_os_str().is_empty() {
+        return;
+    }
+    if p.is_dir() {
+        let _ = std::fs::remove_dir_all(p);
+    } else {
         let _ = std::fs::remove_file(p);
     }
 }

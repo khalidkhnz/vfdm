@@ -11,8 +11,8 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
-const MAX_ATTEMPTS: u32 = 8;
-const STALL_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const MAX_ATTEMPTS: u32 = 8;
+pub(crate) const STALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug)]
 pub enum Outcome {
@@ -25,7 +25,7 @@ pub enum Outcome {
     Failed(EngineError),
 }
 
-fn backoff(attempt: u32) -> Duration {
+pub(crate) fn backoff(attempt: u32) -> Duration {
     let base = Duration::from_secs(1) * 2u32.pow(attempt.min(5));
     let jitter = Duration::from_millis(rand::rng().random_range(0..500));
     (base + jitter).min(Duration::from_secs(30))

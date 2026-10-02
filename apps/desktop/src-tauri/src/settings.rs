@@ -49,6 +49,9 @@ impl AppSettings {
             download_dir: self.download_dir.clone(),
             max_connections: self.max_connections,
             max_concurrent: self.max_concurrent,
+            ffmpeg_path: None,
+            ytdlp_path: None,
+            js_runtime: None,
         }
     }
 }

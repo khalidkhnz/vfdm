@@ -9,7 +9,7 @@ license = "MIT"
 repository = "https://github.com/khalidkhnz/vfdm"
 
 [workspace.dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "sync", "time", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "sync", "time", "io-util", "process"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream", "charset"] }
 serde = { version = "1", features = ["derive"] }

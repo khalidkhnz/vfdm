@@ -92,10 +92,58 @@ fn ext_from_mime(ct: &str) -> Option<&'static str> {
         "image/jpeg" => "jpg",
         "image/gif" => "gif",
         "image/webp" => "webp",
+        "application/vnd.apple.mpegurl" | "application/x-mpegurl" => "m3u8",
+        "application/dash+xml" => "mpd",
+        "video/mp2t" => "ts",
         "text/plain" => "txt",
         "text/html" => "html",
         _ => return None,
     })
+}
+
+const GENERIC_MANIFEST_NAMES: &[&str] = &[
+    "index",
+    "master",
+    "playlist",
+    "manifest",
+    "chunklist",
+    "prog_index",
+    "stream",
+    "media",
+    "video",
+    "main",
+];
+
+/// Output name for a stream: the hint, else the manifest's last path segment
+/// unless it is a generic name like `index`, then the parent segment, then the host.
+pub fn stream_output_name(hint: Option<&str>, manifest_url: &Url, ext: &str) -> String {
+    let generic = |s: &str| GENERIC_MANIFEST_NAMES.contains(&s.to_ascii_lowercase().as_str());
+    let from_hint = hint
+        .map(sanitize)
+        .filter(|s| !s.is_empty())
+        .map(|s| split_ext(&s).0.to_string());
+    let from_path = || {
+        let segs: Vec<String> = manifest_url
+            .path_segments()?
+            .filter(|s| !s.is_empty())
+            .map(|s| percent_decode_str(s).decode_utf8_lossy().into_owned())
+            .collect();
+        let last = segs.last()?;
+        let stem = split_ext(last).0.to_string();
+        if !stem.is_empty() && !generic(&stem) {
+            return Some(stem);
+        }
+        segs.iter()
+            .rev()
+            .skip(1)
+            .map(|s| split_ext(s).0.to_string())
+            .find(|s| !s.is_empty() && !generic(s))
+    };
+    let stem = from_hint
+        .or_else(from_path)
+        .or_else(|| manifest_url.host_str().map(|h| h.to_string()))
+        .unwrap_or_else(|| "stream".into());
+    sanitize(&format!("{stem}.{ext}"))
 }
 
 /// Strip path separators, control chars, reserved names, trailing dots/spaces; cap length.
@@ -191,6 +239,20 @@ mod tests {
         assert_eq!(sanitize("CON.txt"), "_CON.txt");
         assert_eq!(sanitize("trailing. . "), "trailing");
         assert!(sanitize(&"x".repeat(500)).len() <= MAX_LEN);
+    }
+
+    #[test]
+    fn stream_names() {
+        let u = Url::parse("https://cdn.x.com/shows/ep12/index.m3u8?tok=1").unwrap();
+        assert_eq!(stream_output_name(None, &u, "ts"), "ep12.ts");
+        let u = Url::parse("https://cdn.x.com/shows/trailer.m3u8").unwrap();
+        assert_eq!(stream_output_name(None, &u, "mp4"), "trailer.mp4");
+        assert_eq!(
+            stream_output_name(Some("My Clip.m3u8"), &u, "mp4"),
+            "My Clip.mp4"
+        );
+        let u = Url::parse("https://cdn.x.com/master.m3u8").unwrap();
+        assert_eq!(stream_output_name(None, &u, "ts"), "cdn.x.com.ts");
     }
 
     #[test]

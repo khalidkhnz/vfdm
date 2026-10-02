@@ -3,11 +3,12 @@ use crate::filename;
 use crate::planner;
 use crate::probe::probe;
 use crate::state::Store;
+use crate::stream::detect;
 use crate::types::*;
 use crate::worker::{self, Outcome};
 use crate::writer::preallocate;
 use reqwest::Client;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use tokio::sync::{broadcast, Semaphore};
@@ -23,6 +24,10 @@ pub struct RunCtx {
     pub host_sem: Arc<Semaphore>,
     pub max_connections: u8,
     pub default_dir: PathBuf,
+    pub data_dir: PathBuf,
+    pub ffmpeg_path: Option<PathBuf>,
+    pub ytdlp_path: Option<PathBuf>,
+    pub js_runtime: Option<PathBuf>,
     pub events: broadcast::Sender<DownloadEvent>,
 }
 
@@ -31,7 +36,7 @@ impl RunCtx {
         self.meta.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn set_status(&self, status: DownloadStatus) {
+    pub(crate) fn set_status(&self, status: DownloadStatus) {
         self.lock_meta().status = status.clone();
         let _ = self.events.send(DownloadEvent::Status {
             id: self.id,
@@ -48,10 +53,17 @@ pub enum RunResult {
     Interrupted,
 }
 
+enum Prepared {
+    File,
+    /// The URL turned out to be an HLS/DASH manifest; hand off to `stream::run`.
+    Stream,
+}
+
 pub async fn run(ctx: Arc<RunCtx>) -> RunResult {
     ctx.set_status(DownloadStatus::Probing);
     match prepare(&ctx).await {
-        Ok(()) => {}
+        Ok(Prepared::File) => {}
+        Ok(Prepared::Stream) => return crate::stream::run(ctx).await,
         Err(EngineError::Cancelled) => return RunResult::Interrupted,
         Err(e) => return RunResult::Failed(e.to_string()),
     }
@@ -113,17 +125,38 @@ fn single_segment(total: Option<u64>) -> Segment {
 
 /// Fresh download: probe, pick a filename, plan segments, preallocate.
 /// Resume: re-probe the original URL (signed URLs expire), verify validators.
-async fn prepare(ctx: &RunCtx) -> Result<()> {
-    let (fresh, request) = {
+async fn prepare(ctx: &RunCtx) -> Result<Prepared> {
+    let (fresh, request, kind) = {
         let m = ctx.lock_meta();
-        (m.final_path.as_os_str().is_empty(), m.request.clone())
+        (
+            m.final_path.as_os_str().is_empty(),
+            m.request.clone(),
+            m.kind,
+        )
     };
+    if kind.is_stream() {
+        return Ok(Prepared::Stream);
+    }
+    if kind == Kind::Auto {
+        if let Some(k) = detect::by_url(&request.url) {
+            ctx.lock_meta().kind = k;
+            return Ok(Prepared::Stream);
+        }
+    }
     let pr = tokio::select! {
         _ = ctx.cancel.cancelled() => return Err(EngineError::Cancelled),
         r = probe(&ctx.client, &request) => r?,
     };
 
     let mut m = ctx.lock_meta();
+    if fresh && kind == Kind::Auto {
+        if let Some(k) = pr.content_type.as_deref().and_then(detect::by_content_type) {
+            m.kind = k;
+            ctx.store.save(&m)?;
+            return Ok(Prepared::Stream);
+        }
+        m.kind = Kind::File;
+    }
     if fresh {
         let dest = request
             .dest_dir
@@ -169,7 +202,7 @@ async fn prepare(ctx: &RunCtx) -> Result<()> {
         m.segments = vec![single_segment(m.total)];
     }
     ctx.store.save(&m)?;
-    Ok(())
+    Ok(Prepared::File)
 }
 
 /// Keeps `max_connections` workers busy; when a worker finishes and nothing
@@ -228,30 +261,34 @@ async fn finalize(ctx: &RunCtx) -> RunResult {
         let m = ctx.lock_meta();
         (m.part_path.clone(), m.final_path.clone())
     };
-    // Windows refuses the rename while AV scanners hold the handle; retry briefly.
+    if let Err(e) = rename_with_retry(&part, &fin).await {
+        return RunResult::Failed(e);
+    }
+    mark_completed(ctx);
+    RunResult::Completed
+}
+
+/// Windows refuses the rename while AV scanners hold the handle; retry briefly.
+pub(crate) async fn rename_with_retry(from: &Path, to: &Path) -> std::result::Result<(), String> {
     let mut last = None;
     for _ in 0..5 {
-        match std::fs::rename(&part, &fin) {
-            Ok(()) => {
-                last = None;
-                break;
-            }
+        match std::fs::rename(from, to) {
+            Ok(()) => return Ok(()),
             Err(e) => {
                 last = Some(e);
                 tokio::time::sleep(Duration::from_millis(200)).await;
             }
         }
     }
-    if let Some(e) = last {
-        return RunResult::Failed(format!("rename failed: {e}"));
-    }
-    {
-        let mut m = ctx.lock_meta();
-        m.status = DownloadStatus::Completed;
-        m.completed_at = Some(now_millis());
-        m.request.cookies = None;
-        m.request.headers.clear();
-        let _ = ctx.store.save(&m);
-    }
-    RunResult::Completed
+    Err(format!("rename failed: {}", last.expect("error")))
+}
+
+/// Marks Completed and drops credentials from the persisted request.
+pub(crate) fn mark_completed(ctx: &RunCtx) {
+    let mut m = ctx.lock_meta();
+    m.status = DownloadStatus::Completed;
+    m.completed_at = Some(now_millis());
+    m.request.cookies = None;
+    m.request.headers.clear();
+    let _ = ctx.store.save(&m);
 }

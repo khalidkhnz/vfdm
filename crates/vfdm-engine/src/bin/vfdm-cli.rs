@@ -25,6 +25,9 @@ enum Cmd {
         /// Pause after N seconds, wait 2s, resume (exercises the resume path)
         #[arg(long)]
         pause_after: Option<u64>,
+        /// ffmpeg binary for HLS/DASH remuxing (default: none → .ts output)
+        #[arg(long)]
+        ffmpeg: Option<PathBuf>,
     },
     /// List downloads known in the data dir
     List,
@@ -46,9 +49,11 @@ async fn main() -> anyhow_lite::Result<()> {
             out,
             connections,
             pause_after,
+            ffmpeg,
         } => {
             let mut settings = Settings::new(out);
             settings.max_connections = connections;
+            settings.ffmpeg_path = ffmpeg;
             let engine = Engine::new(settings, &cli.data_dir)?;
             let id = engine.add(DownloadRequest {
                 url,

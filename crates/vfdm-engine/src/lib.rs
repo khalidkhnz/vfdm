@@ -9,11 +9,13 @@ pub mod probe;
 pub mod scheduler;
 pub mod speed;
 pub mod state;
+pub mod stream;
 pub mod types;
 pub mod writer;
 
 mod download;
 mod worker;
+mod ytdlp;
 
 pub use error::EngineError;
 pub use scheduler::Engine;
