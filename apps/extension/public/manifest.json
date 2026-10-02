@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "vfdm – Download with vfdm",
+  "version": "0.1.0",
+  "description": "Sends browser downloads to the vfdm desktop download manager.",
+  "minimum_chrome_version": "120",
+  "permissions": ["downloads", "cookies", "contextMenus", "storage", "alarms", "notifications"],
+  "host_permissions": ["<all_urls>", "http://127.0.0.1/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "vfdm",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/16.png",
+      "48": "icons/48.png",
+      "128": "icons/128.png"
+    }
+  },
+  "options_page": "options.html",
+  "icons": {
+    "16": "icons/16.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  }
+}

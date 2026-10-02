@@ -465,7 +465,7 @@ async fn ticker(weak: Weak<Inner>) {
         let Some(inner) = weak.upgrade() else { return };
         let mut map = lock(&inner.downloads);
         for e in map.values_mut() {
-            let mut m = lock(&e.meta);
+            let m = lock(&e.meta);
             if !m.status.is_active() {
                 continue;
             }
