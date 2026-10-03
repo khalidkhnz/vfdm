@@ -9,6 +9,7 @@ permissions:
 
 jobs:
   extension:
+    needs: [desktop]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,6 +23,8 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           draft: true
+          tag_name: ${{ github.ref_name }}
+          name: vfdm ${{ github.ref_name }}
           files: apps/extension/vfdm-extension.zip
 
   desktop:
