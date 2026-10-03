@@ -1,7 +1,9 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::time::Duration;
-use vfdm_engine::{DownloadEvent, DownloadRequest, DownloadStatus, Engine, Progress, Settings};
+use vfdm_engine::{
+    DownloadEvent, DownloadRequest, DownloadStatus, Engine, Kind, Progress, Settings,
+};
 
 #[derive(Parser)]
 #[command(name = "vfdm-cli", about = "vfdm engine test driver")]
@@ -28,6 +30,15 @@ enum Cmd {
         /// ffmpeg binary for HLS/DASH remuxing (default: none → .ts output)
         #[arg(long)]
         ffmpeg: Option<PathBuf>,
+        /// yt-dlp binary (for --kind ytdlp)
+        #[arg(long)]
+        ytdlp: Option<PathBuf>,
+        /// JS runtime for yt-dlp (node/deno/bun)
+        #[arg(long)]
+        js_runtime: Option<PathBuf>,
+        /// auto | file | hls | dash | ytdlp
+        #[arg(long, default_value = "auto")]
+        kind: String,
     },
     /// List downloads known in the data dir
     List,
@@ -50,14 +61,27 @@ async fn main() -> anyhow_lite::Result<()> {
             connections,
             pause_after,
             ffmpeg,
+            ytdlp,
+            js_runtime,
+            kind,
         } => {
             let mut settings = Settings::new(out);
             settings.max_connections = connections;
             settings.ffmpeg_path = ffmpeg;
+            settings.ytdlp_path = ytdlp;
+            settings.js_runtime = js_runtime;
+            let kind = match kind.as_str() {
+                "file" => Kind::File,
+                "hls" => Kind::Hls,
+                "dash" => Kind::Dash,
+                "ytdlp" => Kind::Ytdlp,
+                _ => Kind::Auto,
+            };
             let engine = Engine::new(settings, &cli.data_dir)?;
             let id = engine.add(DownloadRequest {
                 url,
                 max_connections: Some(connections),
+                kind,
                 ..Default::default()
             })?;
             if let Some(secs) = pause_after {
@@ -139,7 +163,7 @@ fn print_progress(p: &Progress) {
         .segments
         .iter()
         .map(|s| {
-            let len = s.end.saturating_sub(s.start) + 1;
+            let len = s.end.saturating_sub(s.start).saturating_add(1);
             if s.downloaded >= len {
                 '#'
             } else if s.downloaded > 0 {

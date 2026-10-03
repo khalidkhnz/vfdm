@@ -2,8 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type DownloadStatus =
-  | { state: "queued" | "probing" | "downloading" | "paused" | "completed" | "cancelled" }
+  | { state: "queued" | "probing" | "downloading" | "processing" | "paused" | "completed" | "cancelled" }
   | { state: "failed"; message: string };
+
+export type Kind = "auto" | "file" | "hls" | "dash" | "ytdlp";
 
 export interface SegmentProgress {
   start: number;
@@ -14,15 +16,20 @@ export interface SegmentProgress {
 export interface Progress {
   id: number;
   status: DownloadStatus;
+  kind: Kind;
   url: string;
   filename: string;
   final_path: string;
   total: number | null;
+  total_is_estimate: boolean;
   downloaded: number;
   speed_bps: number;
   eta_secs: number | null;
   resumable: boolean;
   segments: SegmentProgress[];
+  segment_count: number | null;
+  segments_done: number | null;
+  note: string | null;
   created_at: number;
   completed_at: number | null;
 }
@@ -32,6 +39,7 @@ export interface DownloadRequest {
   filename?: string;
   dest_dir?: string;
   max_connections?: number;
+  kind?: Kind;
 }
 
 export interface AppSettings {
@@ -40,6 +48,20 @@ export interface AppSettings {
   max_concurrent: number;
   notify_on_complete: boolean;
   focus_on_capture: boolean;
+  ffmpeg_path: string | null;
+  ytdlp_path: string | null;
+  hls_variant: "best" | "ask";
+}
+
+export type ToolName = "ffmpeg" | "ytdlp" | "node";
+
+export interface ToolStatus {
+  name: ToolName;
+  path: string | null;
+  version: string | null;
+  source: "override" | "bundled" | "path" | "missing";
+  installable: boolean;
+  hint: string | null;
 }
 
 export interface BridgeInfo {
@@ -62,6 +84,10 @@ export const api = {
   getBridgeInfo: () => invoke<BridgeInfo>("get_bridge_info"),
   regenerateToken: () => invoke<BridgeInfo>("regenerate_token"),
   pickDownloadDir: () => invoke<string | null>("pick_download_dir"),
+  getTools: () => invoke<ToolStatus[]>("get_tools"),
+  refreshTools: () => invoke<ToolStatus[]>("refresh_tools"),
+  installTool: (name: ToolName) => invoke<ToolStatus>("install_tool", { name }),
+  pickToolPath: () => invoke<string | null>("pick_tool_path"),
 };
 
 export const events = {
@@ -77,4 +103,6 @@ export const events = {
     ),
   onBridgeRequest: (cb: (p: Progress) => void): Promise<UnlistenFn> =>
     listen<Progress>("bridge://request", (e) => cb(e.payload)),
+  onToolsChanged: (cb: (t: ToolStatus[]) => void): Promise<UnlistenFn> =>
+    listen<ToolStatus[]>("tools://changed", (e) => cb(e.payload)),
 };

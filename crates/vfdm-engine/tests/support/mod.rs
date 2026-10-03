@@ -52,6 +52,7 @@ impl TestServer {
             .route("/hls/flip", get(hls_flip))
             .route("/hls/{*rest}", get(hls))
             .route("/hls-fmp4/{*rest}", get(hls_fmp4))
+            .route("/dash/{*rest}", get(dash))
             .route("/{mode}", get(serve))
             .with_state(server.clone());
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
@@ -410,6 +411,80 @@ async fn hls_fmp4(
                 }
                 None => (StatusCode::OK, Body::from(all)).into_response(),
             }
+        }
+        _ => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DASH fixture: SegmentTemplate with $Number$, video = 3 segments + init,
+// audio = 2 segments + init, all plain slices of `data`.
+
+pub const DASH_V_INIT: usize = 500;
+pub const DASH_V_SEG: usize = 250_000;
+pub const DASH_V_SEGS: usize = 3;
+pub const DASH_A_INIT: usize = 300;
+pub const DASH_A_SEG: usize = 100_000;
+pub const DASH_A_SEGS: usize = 2;
+const DASH_A_OFFSET: usize = 2 * 1024 * 1024;
+
+impl TestServer {
+    pub fn dash_video_plain(&self) -> Bytes {
+        self.data.slice(0..DASH_V_INIT + DASH_V_SEG * DASH_V_SEGS)
+    }
+    pub fn dash_audio_plain(&self) -> Bytes {
+        self.data
+            .slice(DASH_A_OFFSET..DASH_A_OFFSET + DASH_A_INIT + DASH_A_SEG * DASH_A_SEGS)
+    }
+}
+
+async fn dash(State(s): State<Arc<TestServer>>, Path(rest): Path<String>) -> Response {
+    s.requests.fetch_add(1, Ordering::SeqCst);
+    let slice = |b: Bytes| (StatusCode::OK, Body::from(b)).into_response();
+    match rest.as_str() {
+        "manifest.mpd" => {
+            let body = String::from(
+                r#"<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT12S">
+  <Period>
+    <AdaptationSet contentType="video" mimeType="video/mp4">
+      <SegmentTemplate timescale="1" duration="4" startNumber="1" media="v/$Number$.m4s" initialization="v/init.mp4"/>
+      <Representation id="low" bandwidth="100000" width="320" height="180"/>
+      <Representation id="high" bandwidth="900000" width="1280" height="720"/>
+    </AdaptationSet>
+    <AdaptationSet contentType="audio" mimeType="audio/mp4" lang="en">
+      <SegmentTemplate timescale="1" duration="6" startNumber="1" media="a/$Number$.m4s" initialization="a/init.mp4"/>
+      <Representation id="aud" bandwidth="64000"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#,
+            );
+            let mut h = HeaderMap::new();
+            h.insert(
+                header::CONTENT_TYPE,
+                "application/dash+xml".parse().unwrap(),
+            );
+            (StatusCode::OK, h, body).into_response()
+        }
+        "v/init.mp4" => slice(s.data.slice(0..DASH_V_INIT)),
+        p if p.starts_with("v/") => {
+            let n: usize = p
+                .trim_start_matches("v/")
+                .trim_end_matches(".m4s")
+                .parse()
+                .unwrap();
+            let start = DASH_V_INIT + (n - 1) * DASH_V_SEG;
+            slice(s.data.slice(start..start + DASH_V_SEG))
+        }
+        "a/init.mp4" => slice(s.data.slice(DASH_A_OFFSET..DASH_A_OFFSET + DASH_A_INIT)),
+        p if p.starts_with("a/") => {
+            let n: usize = p
+                .trim_start_matches("a/")
+                .trim_end_matches(".m4s")
+                .parse()
+                .unwrap();
+            let start = DASH_A_OFFSET + DASH_A_INIT + (n - 1) * DASH_A_SEG;
+            slice(s.data.slice(start..start + DASH_A_SEG))
         }
         _ => StatusCode::NOT_FOUND.into_response(),
     }

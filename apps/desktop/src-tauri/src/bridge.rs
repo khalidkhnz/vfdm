@@ -143,11 +143,19 @@ async fn guard(State(port): State<u16>, req: Request<Body>, next: Next) -> Respo
     resp
 }
 
-async fn ping() -> Json<serde_json::Value> {
+async fn ping(State(app): State<AppHandle>) -> Json<serde_json::Value> {
+    let state = app.state::<AppState>();
+    let tools = state.tool_status();
+    let has = |n: crate::tools::ToolName| tools.iter().any(|t| t.name == n && t.path.is_some());
     Json(serde_json::json!({
         "app": "vfdm",
         "version": env!("CARGO_PKG_VERSION"),
         "protocol": PROTOCOL_VERSION,
+        "features": ["stream", "ytdlp"],
+        "tools": {
+            "ffmpeg": has(crate::tools::ToolName::Ffmpeg),
+            "ytdlp": has(crate::tools::ToolName::Ytdlp),
+        },
     }))
 }
 

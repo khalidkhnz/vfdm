@@ -55,7 +55,13 @@ async fn fetch_inner(
         };
         let mut rb = apply_headers(ctx.client.get(res.url.clone()), req);
         if let Some((s, e)) = res.range {
-            rb = rb.header(RANGE, format!("bytes={s}-{e}"));
+            // u64::MAX end = "to EOF" (DASH SegmentBase after the init range).
+            let v = if e == u64::MAX {
+                format!("bytes={s}-")
+            } else {
+                format!("bytes={s}-{e}")
+            };
+            rb = rb.header(RANGE, v);
         }
         let resp = tokio::select! {
             _ = cancel.cancelled() => return Err(EngineError::Cancelled),

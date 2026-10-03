@@ -1,6 +1,15 @@
+use crate::tools::{ToolName, ToolStatus};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use vfdm_engine::Settings as EngineSettings;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HlsVariantPolicy {
+    #[default]
+    Best,
+    Ask,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -9,6 +18,13 @@ pub struct AppSettings {
     pub max_concurrent: u8,
     pub notify_on_complete: bool,
     pub focus_on_capture: bool,
+    /// Explicit binary paths; empty = auto-detect.
+    #[serde(default)]
+    pub ffmpeg_path: Option<PathBuf>,
+    #[serde(default)]
+    pub ytdlp_path: Option<PathBuf>,
+    #[serde(default)]
+    pub hls_variant: HlsVariantPolicy,
 }
 
 impl AppSettings {
@@ -19,6 +35,9 @@ impl AppSettings {
             max_concurrent: 3,
             notify_on_complete: true,
             focus_on_capture: true,
+            ffmpeg_path: None,
+            ytdlp_path: None,
+            hls_variant: HlsVariantPolicy::Best,
         }
     }
 
@@ -41,17 +60,30 @@ impl AppSettings {
     pub fn clamped(mut self) -> Self {
         self.max_connections = self.max_connections.clamp(1, 16);
         self.max_concurrent = self.max_concurrent.clamp(1, 10);
+        let empty = |p: &Option<PathBuf>| p.as_ref().is_some_and(|p| p.as_os_str().is_empty());
+        if empty(&self.ffmpeg_path) {
+            self.ffmpeg_path = None;
+        }
+        if empty(&self.ytdlp_path) {
+            self.ytdlp_path = None;
+        }
         self
     }
 
-    pub fn to_engine(&self) -> EngineSettings {
+    pub fn to_engine(&self, tools: &[ToolStatus]) -> EngineSettings {
+        let path_of = |n: ToolName| {
+            tools
+                .iter()
+                .find(|t| t.name == n)
+                .and_then(|t| t.path.clone())
+        };
         EngineSettings {
             download_dir: self.download_dir.clone(),
             max_connections: self.max_connections,
             max_concurrent: self.max_concurrent,
-            ffmpeg_path: None,
-            ytdlp_path: None,
-            js_runtime: None,
+            ffmpeg_path: path_of(ToolName::Ffmpeg),
+            ytdlp_path: path_of(ToolName::Ytdlp),
+            js_runtime: path_of(ToolName::Node),
         }
     }
 }

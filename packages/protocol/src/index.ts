@@ -8,6 +8,9 @@ export const PROTOCOL_VERSION = 1;
 
 export const PORT_RANGE = { start: 7800, end: 7810 } as const;
 
+/** How the app should fetch the URL. `auto` sniffs by extension / Content-Type. */
+export type Kind = "auto" | "file" | "hls" | "dash" | "ytdlp";
+
 export interface DownloadRequest {
   url: string;
   original_url?: string;
@@ -18,12 +21,18 @@ export interface DownloadRequest {
   headers?: [string, string][];
   dest_dir?: string;
   max_connections?: number;
+  kind?: Kind;
+  /** Page the media was found on; also used as Referer. */
+  page_url?: string;
 }
 
 export interface PingResponse {
   app: "vfdm";
   version: string;
   protocol: number;
+  /** Present from app 0.2: capabilities the UI can rely on. */
+  features?: string[];
+  tools?: { ffmpeg: boolean; ytdlp: boolean };
 }
 
 export interface DownloadResponse {

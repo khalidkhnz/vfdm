@@ -3,6 +3,7 @@ mod commands;
 mod events;
 mod settings;
 mod state;
+mod tools;
 
 use state::AppState;
 use tauri::Manager;
@@ -41,6 +42,10 @@ pub fn run() {
             commands::get_bridge_info,
             commands::regenerate_token,
             commands::pick_download_dir,
+            commands::get_tools,
+            commands::refresh_tools,
+            commands::install_tool,
+            commands::pick_tool_path,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

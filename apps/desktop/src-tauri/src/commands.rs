@@ -1,6 +1,7 @@
 use crate::bridge::{self, BridgeInfo};
 use crate::settings::AppSettings;
 use crate::state::AppState;
+use crate::tools::{self, ToolName, ToolStatus};
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 use vfdm_engine::{DownloadId, DownloadRequest, Progress};
@@ -77,11 +78,14 @@ pub fn get_settings(state: State<'_, AppState>) -> AppSettings {
 }
 
 #[tauri::command]
-pub fn set_settings(state: State<'_, AppState>, settings: AppSettings) -> CmdResult<AppSettings> {
+pub async fn set_settings(
+    state: State<'_, AppState>,
+    settings: AppSettings,
+) -> CmdResult<AppSettings> {
     let settings = settings.clamped();
     settings.save(&state.data_dir).map_err(err)?;
-    state.engine.set_settings(settings.to_engine());
     *state.settings.write().unwrap_or_else(|e| e.into_inner()) = settings.clone();
+    state.refresh_tools().await;
     Ok(settings)
 }
 
@@ -116,5 +120,30 @@ pub async fn pick_download_dir(
     })
     .await
     .map_err(err)?;
+    Ok(picked.map(|p| p.to_string()))
+}
+
+#[tauri::command]
+pub fn get_tools(state: State<'_, AppState>) -> Vec<ToolStatus> {
+    state.tool_status()
+}
+
+#[tauri::command]
+pub async fn refresh_tools(state: State<'_, AppState>) -> CmdResult<Vec<ToolStatus>> {
+    state.refresh_tools().await;
+    Ok(state.tool_status())
+}
+
+#[tauri::command]
+pub async fn install_tool(app: AppHandle, name: ToolName) -> CmdResult<ToolStatus> {
+    tools::install(&app, name).await
+}
+
+#[tauri::command]
+pub async fn pick_tool_path(app: AppHandle) -> CmdResult<Option<String>> {
+    let picked =
+        tauri::async_runtime::spawn_blocking(move || app.dialog().file().blocking_pick_file())
+            .await
+            .map_err(err)?;
     Ok(picked.map(|p| p.to_string()))
 }

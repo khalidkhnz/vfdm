@@ -26,26 +26,26 @@ async function fetchTimeout(url: string, init: RequestInit = {}, ms = PING_TIMEO
   }
 }
 
-async function pingPort(port: number): Promise<boolean> {
+export async function ping(port: number): Promise<PingResponse | null> {
   try {
     const r = await fetchTimeout(bridgeBase(port) + ENDPOINTS.ping);
-    if (!r.ok) return false;
+    if (!r.ok) return null;
     const j = (await r.json()) as PingResponse;
-    return j.app === "vfdm" && j.protocol === PROTOCOL_VERSION;
+    return j.app === "vfdm" && j.protocol === PROTOCOL_VERSION ? j : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
 /** Returns the live port, scanning the range if the cached one went away. */
 export async function findPort(preferred: number): Promise<number | null> {
-  if (preferred > 0) return (await pingPort(preferred)) ? preferred : null;
+  if (preferred > 0) return (await ping(preferred)) ? preferred : null;
 
   const cached = (await chrome.storage.session.get(SESSION_KEY))[SESSION_KEY] as Cached | undefined;
-  if (cached && (await pingPort(cached.port))) return cached.port;
+  if (cached && (await ping(cached.port))) return cached.port;
 
   for (let p = PORT_RANGE.start; p <= PORT_RANGE.end; p++) {
-    if (await pingPort(p)) {
+    if (await ping(p)) {
       await chrome.storage.session.set({ [SESSION_KEY]: { port: p, at: Date.now() } satisfies Cached });
       return p;
     }
@@ -54,7 +54,9 @@ export async function findPort(preferred: number): Promise<number | null> {
   return null;
 }
 
-export type SendResult = { ok: true; id: number } | { ok: false; reason: "offline" | "unauthorized" | "rejected" | "error"; detail?: string };
+export type SendResult =
+  | { ok: true; id: number }
+  | { ok: false; reason: "offline" | "unauthorized" | "rejected" | "error"; detail?: string };
 
 export async function sendDownload(port: number, token: string, req: DownloadRequest, dry = false): Promise<SendResult> {
   try {

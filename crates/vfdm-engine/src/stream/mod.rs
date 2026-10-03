@@ -167,6 +167,11 @@ async fn prepare(ctx: &RunCtx) -> Result<Plan> {
     if plan.tracks.is_empty() || plan.tracks.iter().any(|t| t.segments.is_empty()) {
         return Err(EngineError::Other("playlist has no segments".into()));
     }
+    let mut plan = plan;
+    tokio::select! {
+        _ = ctx.cancel.cancelled() => return Err(EngineError::Cancelled),
+        r = expand_open_ranges(ctx, &request, &mut plan) => r?,
+    }
 
     let mut m = ctx.lock_meta();
     if fresh {
@@ -249,6 +254,62 @@ async fn prepare(ctx: &RunCtx) -> Result<Plan> {
     }
     ctx.store.save(&m)?;
     Ok(plan)
+}
+
+/// DASH SegmentBase representations are one open-ended range. Probe the size
+/// and split into fixed chunks so progress and parallel fetching work.
+async fn expand_open_ranges(
+    ctx: &RunCtx,
+    request: &DownloadRequest,
+    plan: &mut Plan,
+) -> Result<()> {
+    const CHUNK: u64 = 4 << 20;
+    for track in &mut plan.tracks {
+        if !track
+            .segments
+            .iter()
+            .any(|s| matches!(s.res.range, Some((_, e)) if e == u64::MAX))
+        {
+            continue;
+        }
+        let mut out = Vec::with_capacity(track.segments.len());
+        for seg in track.segments.drain(..) {
+            match seg.res.range {
+                Some((start, end)) if end == u64::MAX => {
+                    let probe_req = DownloadRequest {
+                        url: seg.res.url.to_string(),
+                        ..request.clone()
+                    };
+                    let pr = crate::probe::probe(&ctx.client, &probe_req).await?;
+                    let total = pr.total.ok_or_else(|| {
+                        EngineError::Other(
+                            "cannot determine the size of a DASH representation".into(),
+                        )
+                    })?;
+                    if start >= total {
+                        return Err(EngineError::Other("DASH representation is empty".into()));
+                    }
+                    let mut s = start;
+                    while s < total {
+                        let e = (s + CHUNK - 1).min(total - 1);
+                        out.push(SegmentPlan {
+                            res: Resource {
+                                url: seg.res.url.clone(),
+                                range: Some((s, e)),
+                            },
+                            key: None,
+                            init_idx: seg.init_idx,
+                        });
+                        s = e + 1;
+                    }
+                }
+                _ => out.push(seg),
+            }
+        }
+        track.segments = out;
+        track.fingerprint = TrackPlan::fingerprint_of(&track.segments);
+    }
+    Ok(())
 }
 
 fn file_name(p: &Path) -> String {

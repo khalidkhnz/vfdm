@@ -3,19 +3,51 @@
   <head>
     <meta charset="UTF-8" />
     <style>
-      :root { color-scheme: light dark; }
-      body { font: 13px/1.4 system-ui, sans-serif; width: 240px; margin: 0; padding: 12px; }
-      .row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-      .dot { width: 9px; height: 9px; border-radius: 50%; background: #9ca3af; }
+      :root { color-scheme: light dark; --muted: #8a8f98; --line: #8884; --accent: #0ea5e9; }
+      body { font: 13px/1.4 system-ui, sans-serif; width: 360px; margin: 0; padding: 10px 12px 12px; }
+      .row { display: flex; align-items: center; gap: 8px; }
+      .top { margin-bottom: 8px; }
+      .dot { width: 9px; height: 9px; border-radius: 50%; background: #9ca3af; flex: none; }
       .dot.on { background: #16a34a; } .dot.off { background: #dc2626; }
-      button { width: 100%; padding: 6px; border-radius: 6px; border: 1px solid #8886; background: transparent; color: inherit; cursor: pointer; font: inherit; margin-top: 6px; }
-      label { display: flex; align-items: center; gap: 8px; }
+      .grow { flex: 1; }
+      label.toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+      h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 10px 0 6px; }
+      ul { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow: auto; }
+      li { display: grid; grid-template-columns: 38px 1fr auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
+      .tag { font-size: 10px; font-weight: 600; text-align: center; padding: 2px 0; border-radius: 4px; background: #8882; }
+      .tag.hls, .tag.dash { background: #0ea5e933; color: var(--accent); }
+      .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .meta { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      button { padding: 5px 10px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: inherit; cursor: pointer; font: inherit; }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button:disabled { opacity: .5; cursor: default; }
+      .empty { color: var(--muted); padding: 10px 0; }
+      .foot { display: flex; gap: 8px; margin-top: 10px; }
+      .foot button { flex: 1; }
+      .msg { font-size: 12px; margin-top: 6px; min-height: 1em; }
+      .msg.err { color: #dc2626; } .msg.ok { color: #16a34a; }
+      details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 6px; }
     </style>
   </head>
   <body>
-    <div class="row"><span class="dot" id="dot"></span><span id="text">Checking…</span></div>
-    <label><input type="checkbox" id="enabled" /> Capture downloads</label>
-    <button id="options">Options</button>
+    <div class="row top">
+      <span class="dot" id="dot"></span><span id="text" class="grow">Checking…</span>
+      <label class="toggle"><input type="checkbox" id="enabled" /> capture</label>
+    </div>
+
+    <h2>Media on this page</h2>
+    <ul id="items"></ul>
+    <div id="empty" class="empty" hidden>Nothing detected yet. Play the video, then reopen this popup.</div>
+    <details id="segwrap" hidden>
+      <summary id="segsum"></summary>
+      <ul id="segments"></ul>
+    </details>
+
+    <div class="foot">
+      <button id="ytdlp" class="primary" title="Send the page URL to yt-dlp (YouTube, Vimeo, …)">Download page with yt-dlp</button>
+      <button id="options">Options</button>
+    </div>
+    <div id="msg" class="msg"></div>
     <script type="module" src="/src/popup.ts"></script>
   </body>
 </html>

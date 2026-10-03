@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../lib/ipc";
+import { api, type Kind } from "../lib/ipc";
 
 interface Props {
   open: boolean;
@@ -13,6 +13,7 @@ export default function AddUrlDialog({ open, onClose, defaultDir, defaultConnect
   const [filename, setFilename] = useState("");
   const [dir, setDir] = useState(defaultDir);
   const [conns, setConns] = useState(defaultConnections);
+  const [kind, setKind] = useState<Kind>("auto");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -44,6 +45,7 @@ export default function AddUrlDialog({ open, onClose, defaultDir, defaultConnect
           filename: list.length === 1 && filename ? filename : undefined,
           dest_dir: dir || undefined,
           max_connections: conns,
+          kind,
         });
       }
       setUrls("");
@@ -71,7 +73,7 @@ export default function AddUrlDialog({ open, onClose, defaultDir, defaultConnect
           className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 font-mono text-sm outline-none focus:border-sky-600"
           placeholder="https://example.com/file.zip"
         />
-        <div className="mt-3 grid grid-cols-[1fr_120px] gap-3">
+        <div className="mt-3 grid grid-cols-[1fr_130px_120px] gap-3">
           <div>
             <label className="block text-xs text-neutral-400">Save as (optional, single URL)</label>
             <input
@@ -79,6 +81,20 @@ export default function AddUrlDialog({ open, onClose, defaultDir, defaultConnect
               onChange={(e) => setFilename(e.target.value)}
               className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-1.5 text-sm outline-none focus:border-sky-600"
             />
+          </div>
+          <div>
+            <label className="block text-xs text-neutral-400">Type</label>
+            <select
+              value={kind}
+              onChange={(e) => setKind(e.target.value as Kind)}
+              className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm outline-none focus:border-sky-600"
+            >
+              <option value="auto">Auto-detect</option>
+              <option value="file">File</option>
+              <option value="hls">HLS (.m3u8)</option>
+              <option value="dash">DASH (.mpd)</option>
+              <option value="ytdlp">yt-dlp (page URL)</option>
+            </select>
           </div>
           <div>
             <label className="block text-xs text-neutral-400">Connections</label>

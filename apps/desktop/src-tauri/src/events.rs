@@ -11,6 +11,7 @@ pub const EV_STATUS: &str = "download://status";
 pub const EV_ADDED: &str = "download://added";
 pub const EV_REMOVED: &str = "download://removed";
 pub const EV_BRIDGE_REQUEST: &str = "bridge://request";
+pub const EV_TOOLS: &str = "tools://changed";
 
 const BATCH_INTERVAL: Duration = Duration::from_millis(100);
 

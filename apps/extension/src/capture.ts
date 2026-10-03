@@ -1,4 +1,5 @@
 import type { DownloadRequest } from "@vfdm/protocol";
+import type { MediaItem } from "./sniff";
 
 /** Cookie header for a URL, as the browser would send it. */
 export async function cookieHeader(...urls: string[]): Promise<string | undefined> {
@@ -34,6 +35,7 @@ export async function fromDownloadItem(item: chrome.downloads.DownloadItem): Pro
     referrer: item.referrer || undefined,
     user_agent: navigator.userAgent,
     cookies: await cookieHeader(url, item.url),
+    kind: "auto",
   };
 }
 
@@ -41,7 +43,32 @@ export async function fromLink(url: string, referrer?: string): Promise<Download
   return {
     url,
     referrer: referrer || undefined,
+    page_url: referrer || undefined,
     user_agent: navigator.userAgent,
     cookies: await cookieHeader(url, referrer ?? ""),
+    kind: "auto",
+  };
+}
+
+export async function fromMediaItem(item: MediaItem, pageUrl: string): Promise<DownloadRequest> {
+  return {
+    url: item.url,
+    kind: item.kind === "segment" ? "file" : item.kind,
+    filename: item.kind === "file" || item.kind === "segment" ? item.filename : undefined,
+    referrer: pageUrl || undefined,
+    page_url: pageUrl || undefined,
+    user_agent: navigator.userAgent,
+    cookies: await cookieHeader(item.url, pageUrl),
+  };
+}
+
+export async function fromPageForYtdlp(pageUrl: string): Promise<DownloadRequest> {
+  return {
+    url: pageUrl,
+    kind: "ytdlp",
+    page_url: pageUrl,
+    referrer: pageUrl,
+    user_agent: navigator.userAgent,
+    cookies: await cookieHeader(pageUrl),
   };
 }
