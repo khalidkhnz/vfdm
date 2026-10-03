@@ -45,15 +45,15 @@ pub fn decrypt_aes128_cbc(data: &[u8], key: &[u8; 16], iv: &[u8; 16]) -> Result<
     let cipher = Aes128::new(&Array::from(*key));
     let mut out = Vec::with_capacity(data.len());
     let mut prev = *iv;
-    for chunk in data.chunks_exact(16) {
-        let cur: [u8; 16] = chunk.try_into().expect("16-byte chunk");
-        let mut block = Array::from(cur);
+    let (blocks, _) = data.as_chunks::<16>();
+    for cur in blocks {
+        let mut block = Array::from(*cur);
         cipher.decrypt_block(&mut block);
         let plain: [u8; 16] = block.0;
         for i in 0..16 {
             out.push(plain[i] ^ prev[i]);
         }
-        prev = cur;
+        prev = *cur;
     }
     let pad = *out.last().unwrap() as usize;
     if pad == 0
@@ -114,14 +114,15 @@ mod tests {
         let mut buf = plain.to_vec();
         buf.extend(std::iter::repeat_n(pad as u8, pad));
         let mut prev = *iv;
-        for chunk in buf.chunks_exact_mut(16) {
+        let (blocks, _) = buf.as_chunks_mut::<16>();
+        for chunk in blocks {
             for i in 0..16 {
                 chunk[i] ^= prev[i];
             }
-            let mut block = Array::from(<[u8; 16]>::try_from(&*chunk).unwrap());
+            let mut block = Array::from(*chunk);
             cipher.encrypt_block(&mut block);
-            chunk.copy_from_slice(&block.0);
-            prev.copy_from_slice(chunk);
+            *chunk = block.0;
+            prev = *chunk;
         }
         buf
     }

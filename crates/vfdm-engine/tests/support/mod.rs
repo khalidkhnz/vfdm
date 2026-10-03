@@ -254,14 +254,15 @@ pub fn aes_cbc_encrypt(plain: &[u8], key: &[u8; 16], iv: &[u8; 16]) -> Vec<u8> {
     let mut buf = plain.to_vec();
     buf.extend(std::iter::repeat_n(pad as u8, pad));
     let mut prev = *iv;
-    for chunk in buf.chunks_exact_mut(16) {
+    let (blocks, _) = buf.as_chunks_mut::<16>();
+    for chunk in blocks {
         for i in 0..16 {
             chunk[i] ^= prev[i];
         }
-        let mut block = Array::from(<[u8; 16]>::try_from(&*chunk).unwrap());
+        let mut block = Array::from(*chunk);
         cipher.encrypt_block(&mut block);
-        chunk.copy_from_slice(&block.0);
-        prev.copy_from_slice(chunk);
+        *chunk = block.0;
+        prev = *chunk;
     }
     buf
 }
