@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { Check, Copy, RefreshCw } from "lucide-react";
 import { api, events, type AppSettings, type BridgeInfo, type ToolName, type ToolStatus } from "../lib/ipc";
+import { Button, Dialog, Field, Input, Toggle } from "../components/ui";
 
 interface Props {
   open: boolean;
@@ -7,11 +9,20 @@ interface Props {
   onSaved: (s: AppSettings) => void;
 }
 
-const TOOL_LABEL: Record<ToolName, { title: string; why: string }> = {
-  ffmpeg: { title: "ffmpeg", why: "Remuxes HLS .ts to .mp4 and merges DASH video + audio." },
-  ytdlp: { title: "yt-dlp", why: "Downloads from YouTube, Vimeo and 1000+ sites via the extension's “Download page” button." },
+const TOOL: Record<ToolName, { title: string; why: string }> = {
+  ffmpeg: { title: "ffmpeg", why: "Turns HLS .ts into .mp4 and joins DASH video with audio." },
+  ytdlp: { title: "yt-dlp", why: "Downloads from YouTube, Vimeo and other sites that need site-specific logic." },
   node: { title: "Node.js", why: "yt-dlp needs a JavaScript runtime for YouTube." },
 };
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="border-b border-line py-4 first:pt-0 last:border-b-0 last:pb-0">
+      <h3 className="mb-3 text-[13px] font-semibold">{title}</h3>
+      {children}
+    </section>
+  );
+}
 
 function ToolRow({
   t,
@@ -26,48 +37,41 @@ function ToolRow({
   onBrowse: () => void;
   onClear: () => void;
 }) {
-  const label = TOOL_LABEL[t.name];
+  const label = TOOL[t.name];
   const found = !!t.path;
   return (
     <div className="flex items-start gap-3 py-2">
+      <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${found ? "bg-ok" : "bg-error"}`} />
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">{label.title}</span>
-          <span
-            className={`rounded border px-1.5 py-px text-[10px] uppercase tracking-wide ${
-              found ? "border-emerald-800 text-emerald-300" : "border-rose-800 text-rose-300"
-            }`}
-          >
-            {found ? `${t.source}${t.version ? ` · ${t.version}` : ""}` : "missing"}
+        <div className="flex items-baseline gap-2">
+          <span className="text-[13.5px] font-medium">{label.title}</span>
+          <span className="font-mono text-[11.5px] text-dim">
+            {found ? `${t.version ?? ""} ${t.source === "path" ? "on this Mac" : t.source === "bundled" ? "installed by vfdm" : "custom path"}`.trim() : "not found"}
           </span>
         </div>
-        <div className="mt-0.5 text-xs text-neutral-500">{label.why}</div>
+        <div className="text-[12px] text-mute">{label.why}</div>
         {t.path && (
-          <div className="mt-0.5 truncate font-mono text-[11px] text-neutral-500" title={t.path}>
+          <div className="mt-0.5 truncate font-mono text-[11px] text-dim" title={t.path}>
             {t.path}
           </div>
         )}
-        {t.hint && <div className="mt-1 text-xs text-amber-300/90">{t.hint}</div>}
+        {t.hint && <div className="mt-1 text-[12px] text-warn">{t.hint}</div>}
       </div>
       <div className="flex shrink-0 gap-1">
         {t.installable && (
-          <button
-            onClick={onInstall}
-            disabled={busy}
-            className="rounded-md border border-neutral-700 px-2.5 py-1 text-xs hover:bg-neutral-800 disabled:opacity-50"
-          >
+          <Button onClick={onInstall} disabled={busy} className="h-7 px-2.5 text-[12px]">
             {busy ? "Installing…" : found && t.source === "bundled" ? "Update" : "Install"}
-          </button>
+          </Button>
         )}
         {t.name !== "node" && (
-          <button onClick={onBrowse} className="rounded-md border border-neutral-700 px-2.5 py-1 text-xs hover:bg-neutral-800">
-            Browse…
-          </button>
+          <Button variant="ghost" onClick={onBrowse} className="h-7 px-2.5 text-[12px]">
+            Choose file…
+          </Button>
         )}
         {t.source === "override" && (
-          <button onClick={onClear} className="rounded-md px-2 py-1 text-xs text-neutral-400 hover:bg-neutral-800" title="Use auto-detect">
-            ×
-          </button>
+          <Button variant="ghost" onClick={onClear} className="h-7 px-2 text-[12px]" title="Back to auto-detect">
+            Reset
+          </Button>
         )}
       </div>
     </div>
@@ -94,7 +98,7 @@ export default function Settings({ open, onClose, onSaved }: Props) {
     };
   }, [open]);
 
-  if (!open || !s) return null;
+  if (!s) return null;
 
   const save = async () => {
     try {
@@ -126,9 +130,7 @@ export default function Settings({ open, onClose, onSaved }: Props) {
     }
   };
 
-  const browse = async (name: ToolName) => {
-    const p = await api.pickToolPath();
-    if (!p) return;
+  const setToolPath = async (name: ToolName, p: string | null) => {
     const next = name === "ffmpeg" ? { ...s, ffmpeg_path: p } : { ...s, ytdlp_path: p };
     setS(next);
     try {
@@ -140,124 +142,112 @@ export default function Settings({ open, onClose, onSaved }: Props) {
     }
   };
 
-  const clearOverride = async (name: ToolName) => {
-    const next = name === "ffmpeg" ? { ...s, ffmpeg_path: null } : { ...s, ytdlp_path: null };
-    setS(next);
-    const saved = await api.setSettings(next);
-    onSaved(saved);
-    setTools(await api.getTools());
-  };
-
-  const field = "mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-1.5 text-sm outline-none focus:border-sky-600";
-
   return (
-    <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div
-        className="max-h-[92vh] w-[640px] max-w-[92vw] overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900 p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-base font-semibold">Settings</h2>
-
-        <label className="mt-4 block text-xs text-neutral-400">Download folder</label>
-        <div className="mt-1 flex gap-2">
-          <input value={s.download_dir} onChange={(e) => setS({ ...s, download_dir: e.target.value })} className={`${field} mt-0 flex-1`} />
-          <button
-            onClick={async () => {
-              const p = await api.pickDownloadDir();
-              if (p) setS({ ...s, download_dir: p });
-            }}
-            className="rounded-md border border-neutral-700 px-3 text-sm hover:bg-neutral-800"
-          >
-            Browse
-          </button>
-        </div>
-
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs text-neutral-400">Connections per download (1–16)</label>
-            <input
-              type="number"
-              min={1}
-              max={16}
-              value={s.max_connections}
-              onChange={(e) => setS({ ...s, max_connections: Number(e.target.value) || 1 })}
-              className={field}
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-neutral-400">Concurrent downloads (1–10)</label>
-            <input
-              type="number"
-              min={1}
-              max={10}
-              value={s.max_concurrent}
-              onChange={(e) => setS({ ...s, max_concurrent: Number(e.target.value) || 1 })}
-              className={field}
-            />
-          </div>
-        </div>
-
-        <label className="mt-3 flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={s.notify_on_complete} onChange={(e) => setS({ ...s, notify_on_complete: e.target.checked })} />
-          Notify when a download completes
-        </label>
-        <label className="mt-2 flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={s.focus_on_capture} onChange={(e) => setS({ ...s, focus_on_capture: e.target.checked })} />
-          Bring window to front when the extension sends a download
-        </label>
-
-        <div className="mt-5 rounded-lg border border-neutral-800 bg-neutral-950/60 p-3">
-          <div className="text-sm font-medium">Tools</div>
-          <p className="mt-1 text-xs text-neutral-400">
-            Optional helpers for streams. Detected from PATH and Homebrew; Install puts a copy in the app's data folder.
-          </p>
-          <div className="mt-2 divide-y divide-neutral-800">
-            {tools.map((t) => (
-              <ToolRow
-                key={t.name}
-                t={t}
-                busy={installing === t.name}
-                onInstall={() => install(t.name)}
-                onBrowse={() => browse(t.name)}
-                onClear={() => clearOverride(t.name)}
-              />
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-950/60 p-3">
-          <div className="text-sm font-medium">Browser extension pairing</div>
-          <p className="mt-1 text-xs text-neutral-400">
-            Paste this token into the vfdm extension options page. The app listens on{" "}
-            <span className="font-mono">127.0.0.1:{bridge?.port || "…"}</span>.
-          </p>
-          <div className="mt-2 flex items-center gap-2">
-            <code className="flex-1 truncate rounded bg-neutral-900 px-2 py-1 font-mono text-xs text-neutral-300 select-text">
-              {bridge?.token ?? "…"}
-            </code>
-            <button onClick={copyToken} className="rounded-md border border-neutral-700 px-3 py-1 text-xs hover:bg-neutral-800">
-              {copied ? "Copied" : "Copy"}
-            </button>
-            <button
-              onClick={async () => setBridge(await api.regenerateToken())}
-              className="rounded-md border border-neutral-700 px-3 py-1 text-xs text-amber-300 hover:bg-neutral-800"
-              title="Old token stops working immediately"
-            >
-              Regenerate
-            </button>
-          </div>
-        </div>
-
-        {error && <div className="mt-3 text-xs text-rose-300">{error}</div>}
-        <div className="mt-5 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800">
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Settings"
+      width={620}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
             Cancel
-          </button>
-          <button onClick={save} className="rounded-md bg-sky-600 px-4 py-1.5 text-sm font-medium hover:bg-sky-500">
-            Save
-          </button>
+          </Button>
+          <Button variant="primary" onClick={save}>
+            Save changes
+          </Button>
+        </>
+      }
+    >
+      <Section title="Downloads">
+        <div className="flex flex-col gap-3">
+          <Field label="Save files to">
+            <div className="flex gap-2">
+              <Input value={s.download_dir} onChange={(e) => setS({ ...s, download_dir: e.target.value })} />
+              <Button
+                onClick={async () => {
+                  const p = await api.pickDownloadDir();
+                  if (p) setS({ ...s, download_dir: p });
+                }}
+                className="h-9 shrink-0"
+              >
+                Choose…
+              </Button>
+            </div>
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Connections per download" hint="1–16. More helps on throttled servers.">
+              <Input
+                type="number"
+                min={1}
+                max={16}
+                value={s.max_connections}
+                onChange={(e) => setS({ ...s, max_connections: Number(e.target.value) || 1 })}
+              />
+            </Field>
+            <Field label="Downloads at once" hint="1–10. The rest wait in line.">
+              <Input
+                type="number"
+                min={1}
+                max={10}
+                value={s.max_concurrent}
+                onChange={(e) => setS({ ...s, max_concurrent: Number(e.target.value) || 1 })}
+              />
+            </Field>
+          </div>
         </div>
-      </div>
-    </div>
+      </Section>
+
+      <Section title="Behaviour">
+        <Toggle checked={s.notify_on_complete} onChange={(v) => setS({ ...s, notify_on_complete: v })} label="Notify when a download finishes" />
+        <Toggle checked={s.focus_on_capture} onChange={(v) => setS({ ...s, focus_on_capture: v })} label="Bring vfdm to the front when the browser sends a download" />
+      </Section>
+
+      <Section title="Tools">
+        <p className="mb-1 text-[12.5px] text-mute">Found automatically on this computer. Install puts a private copy in vfdm's data folder.</p>
+        <div className="divide-y divide-line">
+          {tools.map((t) => (
+            <ToolRow
+              key={t.name}
+              t={t}
+              busy={installing === t.name}
+              onInstall={() => install(t.name)}
+              onBrowse={async () => {
+                const p = await api.pickToolPath();
+                if (p) await setToolPath(t.name, p);
+              }}
+              onClear={() => setToolPath(t.name, null)}
+            />
+          ))}
+        </div>
+      </Section>
+
+      <Section title="Browser extension">
+        <p className="text-[12.5px] text-mute">
+          Paste this token into the vfdm extension's options page. The app listens on{" "}
+          <span className="font-mono text-ink">127.0.0.1:{bridge?.port || "…"}</span>.
+        </p>
+        <div className="mt-2 flex items-center gap-2">
+          <code className="min-w-0 flex-1 truncate rounded-md border border-line bg-raised px-2.5 py-1.5 font-mono text-[12px] text-mute">
+            {bridge?.token ?? "…"}
+          </code>
+          <Button onClick={copyToken} className="h-8 shrink-0">
+            {copied ? <Check size={14} className="text-ok" /> : <Copy size={14} />}
+            {copied ? "Copied" : "Copy"}
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={async () => setBridge(await api.regenerateToken())}
+            className="h-8 shrink-0"
+            title="The old token stops working immediately"
+          >
+            <RefreshCw size={14} />
+            New token
+          </Button>
+        </div>
+      </Section>
+
+      {error && <p className="mt-3 text-[12.5px] text-error">{error}</p>}
+    </Dialog>
   );
 }

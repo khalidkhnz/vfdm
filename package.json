@@ -1,13 +1,18 @@
 {
   "name": "vfdm",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "packageManager": "pnpm@10.29.3",
-  "engines": { "node": ">=20.19" },
+  "engines": {
+    "node": ">=20.19"
+  },
   "scripts": {
     "dev": "pnpm --filter @vfdm/desktop tauri dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test:engine": "cargo test -p vfdm-engine"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.12.0"
   }
 }

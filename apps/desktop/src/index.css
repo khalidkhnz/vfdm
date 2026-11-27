@@ -1,16 +1,164 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: "Geist";
+  font-weight: 400;
+  font-display: swap;
+  src: url("../node_modules/geist/dist/fonts/geist-sans/Geist-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist";
+  font-weight: 500;
+  font-display: swap;
+  src: url("../node_modules/geist/dist/fonts/geist-sans/Geist-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist";
+  font-weight: 600;
+  font-display: swap;
+  src: url("../node_modules/geist/dist/fonts/geist-sans/Geist-SemiBold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist Mono";
+  font-weight: 400;
+  font-display: swap;
+  src: url("../node_modules/geist/dist/fonts/geist-mono/GeistMono-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist Mono";
+  font-weight: 500;
+  font-display: swap;
+  src: url("../node_modules/geist/dist/fonts/geist-mono/GeistMono-Medium.woff2") format("woff2");
+}
+
+@theme {
+  --color-bg: #0f1218;
+  --color-surface: #151a22;
+  --color-raised: #1b212b;
+  --color-line: #262d39;
+  --color-ink: #e9edf3;
+  --color-mute: #8d96a5;
+  --color-dim: #5b6474;
+  --color-accent: #5b8def;
+  --color-accent-hi: #7ba3f5;
+  --color-ok: #3ddc97;
+  --color-warn: #f2b84b;
+  --color-error: #ff6b6b;
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
 :root {
   color-scheme: dark;
 }
 
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 input,
 textarea,
-select {
+select,
+code,
+kbd {
   user-select: text;
   -webkit-user-select: text;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border: 3px solid var(--color-bg);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Block map: each cell paints its own slice of the file. */
+.cell {
+  flex: none;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--color-raised);
+  position: relative;
+  overflow: hidden;
+}
+.cell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  transform: scaleX(var(--fill, 0));
+  background: hsl(var(--h, 222) 82% 64%);
+  transition: transform 0.35s ease;
+}
+.cell-active::after {
+  animation: cell-shimmer 1.6s ease-in-out infinite;
+}
+.cell-paused::after {
+  background: hsl(var(--h, 222) 22% 46%);
+}
+@keyframes cell-shimmer {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.55);
+  }
+}
+
+.dialog-in {
+  animation: dialog-pop 0.16s ease-out;
+}
+@keyframes dialog-pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+}
+
+.toast-in {
+  animation: toast-rise 0.2s ease-out;
+}
+@keyframes toast-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.drop-ring {
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cell::after,
+  .dialog-in,
+  .toast-in {
+    transition: none;
+    animation: none !important;
+  }
 }

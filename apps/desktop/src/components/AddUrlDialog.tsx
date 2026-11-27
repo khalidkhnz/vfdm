@@ -1,14 +1,24 @@
 import { useEffect, useState } from "react";
 import { api, type Kind } from "../lib/ipc";
+import { Button, Dialog, Field, Input, Segmented, Textarea } from "./ui";
 
 interface Props {
   open: boolean;
   onClose: () => void;
   defaultDir: string;
   defaultConnections: number;
+  initialUrls?: string;
 }
 
-export default function AddUrlDialog({ open, onClose, defaultDir, defaultConnections }: Props) {
+const KINDS: { value: Kind; label: string }[] = [
+  { value: "auto", label: "Auto" },
+  { value: "file", label: "File" },
+  { value: "hls", label: "HLS" },
+  { value: "dash", label: "DASH" },
+  { value: "ytdlp", label: "yt-dlp" },
+];
+
+export default function AddUrlDialog({ open, onClose, defaultDir, defaultConnections, initialUrls }: Props) {
   const [urls, setUrls] = useState("");
   const [filename, setFilename] = useState("");
   const [dir, setDir] = useState(defaultDir);
@@ -20,24 +30,30 @@ export default function AddUrlDialog({ open, onClose, defaultDir, defaultConnect
     if (!open) return;
     setDir(defaultDir);
     setConns(defaultConnections);
+    setKind("auto");
     setError(null);
+    if (initialUrls) {
+      setUrls(initialUrls);
+      return;
+    }
     navigator.clipboard
       ?.readText()
       .then((t) => {
-        if (/^https?:\/\/\S+$/i.test(t.trim()) && !urls) setUrls(t.trim());
+        if (/^https?:\/\/\S+$/i.test(t.trim())) setUrls(t.trim());
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  if (!open) return null;
+  const list = urls
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   const submit = async () => {
-    const list = urls
-      .split(/\r?\n/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (list.length === 0) return setError("Paste at least one URL");
+    if (list.length === 0) return setError("Paste at least one link.");
+    const bad = list.find((u) => !/^https?:\/\//i.test(u));
+    if (bad) return setError(`Not a web link: ${bad}`);
     try {
       for (const url of list) {
         await api.add({
@@ -57,84 +73,72 @@ export default function AddUrlDialog({ open, onClose, defaultDir, defaultConnect
   };
 
   return (
-    <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div
-        className="w-[560px] max-w-[92vw] rounded-xl border border-neutral-800 bg-neutral-900 p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-base font-semibold">Add download</h2>
-        <label className="mt-4 block text-xs text-neutral-400">URLs (one per line)</label>
-        <textarea
-          autoFocus
-          value={urls}
-          onChange={(e) => setUrls(e.target.value)}
-          rows={4}
-          spellCheck={false}
-          className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 font-mono text-sm outline-none focus:border-sky-600"
-          placeholder="https://example.com/file.zip"
-        />
-        <div className="mt-3 grid grid-cols-[1fr_130px_120px] gap-3">
-          <div>
-            <label className="block text-xs text-neutral-400">Save as (optional, single URL)</label>
-            <input
-              value={filename}
-              onChange={(e) => setFilename(e.target.value)}
-              className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-1.5 text-sm outline-none focus:border-sky-600"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-neutral-400">Type</label>
-            <select
-              value={kind}
-              onChange={(e) => setKind(e.target.value as Kind)}
-              className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm outline-none focus:border-sky-600"
-            >
-              <option value="auto">Auto-detect</option>
-              <option value="file">File</option>
-              <option value="hls">HLS (.m3u8)</option>
-              <option value="dash">DASH (.mpd)</option>
-              <option value="ytdlp">yt-dlp (page URL)</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-neutral-400">Connections</label>
-            <input
-              type="number"
-              min={1}
-              max={16}
-              value={conns}
-              onChange={(e) => setConns(Math.min(16, Math.max(1, Number(e.target.value) || 1)))}
-              className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-1.5 text-sm outline-none focus:border-sky-600"
-            />
-          </div>
-        </div>
-        <label className="mt-3 block text-xs text-neutral-400">Folder</label>
-        <div className="mt-1 flex gap-2">
-          <input
-            value={dir}
-            onChange={(e) => setDir(e.target.value)}
-            className="flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-3 py-1.5 text-sm outline-none focus:border-sky-600"
-          />
-          <button
-            onClick={async () => {
-              const picked = await api.pickDownloadDir();
-              if (picked) setDir(picked);
-            }}
-            className="rounded-md border border-neutral-700 px-3 text-sm hover:bg-neutral-800"
-          >
-            Browse
-          </button>
-        </div>
-        {error && <div className="mt-3 text-xs text-rose-300">{error}</div>}
-        <div className="mt-5 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-md px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800">
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Add download"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
             Cancel
-          </button>
-          <button onClick={submit} className="rounded-md bg-sky-600 px-4 py-1.5 text-sm font-medium hover:bg-sky-500">
-            Download
-          </button>
+          </Button>
+          <Button variant="primary" onClick={submit}>
+            {list.length > 1 ? `Download ${list.length} files` : "Download"}
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <Field label="Links, one per line">
+          <Textarea
+            autoFocus
+            rows={4}
+            spellCheck={false}
+            value={urls}
+            onChange={(e) => setUrls(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void submit();
+            }}
+            placeholder="https://example.com/file.zip"
+          />
+        </Field>
+        <div className="flex flex-wrap items-end gap-4">
+          <Field label="Treat as" hint="Auto reads the link and the server's response.">
+            <Segmented value={kind} options={KINDS} onChange={setKind} />
+          </Field>
+          <div className="w-28">
+            <Field label="Connections">
+              <Input
+                type="number"
+                min={1}
+                max={16}
+                value={conns}
+                onChange={(e) => setConns(Math.min(16, Math.max(1, Number(e.target.value) || 1)))}
+              />
+            </Field>
+          </div>
         </div>
+        {list.length <= 1 && (
+          <Field label="Save as" hint="Leave empty to use the server's name.">
+            <Input value={filename} onChange={(e) => setFilename(e.target.value)} placeholder="optional" />
+          </Field>
+        )}
+        <Field label="Folder">
+          <div className="flex gap-2">
+            <Input value={dir} onChange={(e) => setDir(e.target.value)} />
+            <Button
+              onClick={async () => {
+                const picked = await api.pickDownloadDir();
+                if (picked) setDir(picked);
+              }}
+              className="h-9 shrink-0"
+            >
+              Choose…
+            </Button>
+          </div>
+        </Field>
+        {error && <p className="text-[12.5px] text-error">{error}</p>}
       </div>
-    </div>
+    </Dialog>
   );
 }
